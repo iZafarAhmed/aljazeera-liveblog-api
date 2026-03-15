@@ -4,26 +4,31 @@ const GRAPHQL_URL = 'https://www.aljazeera.com/graphql';
 
 // Helper function to make GraphQL requests
 async function graphqlQuery(operationName, variables) {
-  const response = await fetch(GRAPHQL_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Referer': 'https://www.aljazeera.com/',
-      'Origin': 'https://www.aljazeera.com'
-    },
-    body: JSON.stringify({
-      operationName,
-      variables,
-      extensions: {}
-    })
-  });
+  try {
+    const response = await fetch(GRAPHQL_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.aljazeera.com/',
+        'Origin': 'https://www.aljazeera.com'
+      },
+      body: JSON.stringify({
+        operationName,
+        variables,
+        extensions: {}
+      })
+    });
 
-  if (!response.ok) {
-    throw new Error(`GraphQL request failed: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`GraphQL request failed: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('GraphQL Query Error:', error.message);
+    throw error;
   }
-
-  return response.json();
 }
 
 // Get all children IDs for a liveblog
@@ -42,17 +47,32 @@ async function getLiveBlogChildren(postName) {
 // Get individual update by ID
 async function getUpdateById(postId) {
   try {
-    const data = await graphqlQuery('LiveBlogUpdateQuery', {
+    const graphqlResponse = await graphqlQuery('LiveBlogUpdateQuery', {
       postID: postId.toString(),
       postType: 'liveblog-update',
       preview: '',
       isAmp: false
     });
 
-    return data.data?.posts || null;
+    // Debug: Log the response structure
+    console.log(`GraphQL response for postId ${postId}:`, JSON.stringify(graphqlResponse, null, 2));
+
+    // Check if data exists at different levels
+    if (graphqlResponse.data?.posts) {
+      return graphqlResponse.data.posts;
+    } else if (graphqlResponse.data?.post) {
+      return graphqlResponse.data.post;
+    } else {
+      console.error(`No posts found in response for ${postId}`);
+      console.error('Response structure:', Object.keys(graphqlResponse));
+      return null;
+    }
   } catch (error) {
     console.error(`Error fetching update ${postId}:`, error.message);
-    return null;
+    return {
+      error: error.message,
+      postId: postId
+    };
   }
 }
 
@@ -75,7 +95,7 @@ module.exports = async (req, res) => {
 
   try {
     // Extract postName from query parameters
-    const { postName, postId, all } = req.query;
+    const { postName, postId, all, debug } = req.query;
 
     if (!postName && !postId) {
       return res.status(400).json({
@@ -84,7 +104,8 @@ module.exports = async (req, res) => {
         example: {
           postName: 'iran-war-live-trump-urges-world-to-keep-hormuz-strait-open',
           postId: '4400931',
-          all: 'true (optional - fetches all updates)'
+          all: 'true (optional - fetches all updates)',
+          debug: 'true (optional - shows debug info)'
         }
       });
     }
@@ -92,6 +113,28 @@ module.exports = async (req, res) => {
     // If specific postId is provided, fetch only that update
     if (postId) {
       const update = await getUpdateById(postId);
+      
+      // If debug mode, show the raw response
+      if (debug === 'true') {
+        return res.status(200).json({
+          success: true,
+          debug: true,
+          requestedPostId: postId,
+          data: update,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      if (!update || update.error) {
+        return res.status(404).json({
+          success: false,
+          error: update?.error || 'Update not found',
+          postId: postId,
+          message: 'The requested update could not be found or an error occurred',
+          timestamp: new Date().toISOString()
+        });
+      }
+
       return res.status(200).json({
         success: true,
         data: update,
@@ -108,14 +151,17 @@ module.exports = async (req, res) => {
         childrenIds.map(id => getUpdateById(id))
       );
 
-      // Filter out null values (failed requests)
-      const validUpdates = updates.filter(update => update !== null);
+      // Filter out null values and errors
+      const validUpdates = updates.filter(update => update !== null && !update.error);
+      const failedUpdates = updates.filter(update => update === null || update.error);
 
       return res.status(200).json({
         success: true,
         postName,
         totalUpdates: validUpdates.length,
+        failedCount: failedUpdates.length,
         data: validUpdates,
+        failedUpdates: debug === 'true' ? failedUpdates : undefined,
         timestamp: new Date().toISOString(),
         cache: {
           maxAge: 30, // Suggest caching for 30 seconds
@@ -140,6 +186,7 @@ module.exports = async (req, res) => {
     return res.status(500).json({
       success: false,
       error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
       timestamp: new Date().toISOString()
     });
   }
