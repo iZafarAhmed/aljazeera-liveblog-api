@@ -1,28 +1,25 @@
 const fetch = require('node-fetch');
-const { URLSearchParams } = require('url');
 
 const GRAPHQL_URL = 'https://www.aljazeera.com/graphql';
 
-// Helper: Build query string for GET request
-function buildGraphQLGetUrl(operationName, variables, wpSite = 'aje') {
-  const params = new URLSearchParams({
-    'wp-site': wpSite,
-    'operationName': operationName,
-    'variables': JSON.stringify(variables),
-    'extensions': '{}'
-  });
-  return `${GRAPHQL_URL}?${params.toString()}`;
+// Helper: Build the exact URL structure Al Jazeera expects
+function buildGraphQLUrl(operationName, variables) {
+  const varsEncoded = encodeURIComponent(JSON.stringify(variables));
+  return `${GRAPHQL_URL}?wp-site=aje&operationName=${operationName}&variables=${varsEncoded}&extensions={}`;
 }
 
-// Helper function to make GraphQL GET requests
+// Helper function to make GraphQL GET requests with proper headers
 async function graphqlGetQuery(operationName, variables) {
-  const url = buildGraphQLGetUrl(operationName, variables);
+  const url = buildGraphQLUrl(operationName, variables);
   
   const response = await fetch(url, {
     method: 'GET',
     headers: {
       'Accept': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      // Critical: wp-site as BOTH query param AND header
+      'wp-site': 'aje',
+      'x-wp-site': 'aje',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Referer': 'https://www.aljazeera.com/',
       'Origin': 'https://www.aljazeera.com'
     }
@@ -30,7 +27,7 @@ async function graphqlGetQuery(operationName, variables) {
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => 'No error body');
-    throw new Error(`GraphQL request failed: ${response.status} - ${errorText.substring(0, 200)}`);
+    throw new Error(`GraphQL request failed: ${response.status} - ${errorText.substring(0, 300)}`);
   }
 
   return response.json();
@@ -52,14 +49,14 @@ async function getLiveBlogChildren(postName) {
 // Get individual update by ID
 async function getUpdateById(postId) {
   try {
+    // IMPORTANT: postID must be a NUMBER, not string
     const data = await graphqlGetQuery('LiveBlogUpdateQuery', {
-      postID: postId.toString(),
+      postID: Number(postId),
       postType: 'liveblog-update',
       preview: '',
       isAmp: false
     });
 
-    // Return the posts object directly
     return data.data?.posts || null;
     
   } catch (error) {
@@ -87,7 +84,7 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { postName, postId, all, debug } = req.query;
+    const { postName, postId, all } = req.query;
 
     if (!postName && !postId) {
       return res.status(400).json({
@@ -95,8 +92,7 @@ module.exports = async (req, res) => {
         message: 'Please provide either "postName" or "postId"',
         example: {
           postName: 'iran-war-live-trump-urges-world-to-keep-hormuz-strait-open',
-          postId: '4400931',
-          all: 'true (optional - fetches all updates)'
+          postId: '4400931'
         }
       });
     }
@@ -139,12 +135,7 @@ module.exports = async (req, res) => {
         totalUpdates: validUpdates.length,
         failedCount: failedUpdates.length,
         data: validUpdates,
-        failedUpdates: debug === 'true' ? failedUpdates : undefined,
-        timestamp: new Date().toISOString(),
-        cache: {
-          maxAge: 30,
-          nextFetch: new Date(Date.now() + 30000).toISOString()
-        }
+        timestamp: new Date().toISOString()
       });
     }
 
@@ -155,7 +146,6 @@ module.exports = async (req, res) => {
       childrenCount: childrenIds.length,
       childrenIds,
       message: 'Use all=true to fetch full content',
-      example: `?postName=${postName}&all=true`,
       timestamp: new Date().toISOString()
     });
 
