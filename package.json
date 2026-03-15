@@ -1,0 +1,16 @@
+{
+  "name": "aljazeera-liveblog-api",
+  "version": "1.0.0",
+  "description": "API to fetch Al Jazeera liveblog updates",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
