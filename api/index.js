@@ -107,7 +107,7 @@ module.exports = async (req, res) => {
     if (!postName) {
       return res.status(400).json({
         error: 'Missing postName parameter',
-        example: '?postName=iran-war-live-trump-urges-world-to-keep-hormuz-strait-open'
+        example: '?postName=iran-war-live-tehran-rejects-trump-claim-on-talks-gulf-attacks-continue'
       });
     }
 
